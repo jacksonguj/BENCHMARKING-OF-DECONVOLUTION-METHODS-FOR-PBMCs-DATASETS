@@ -1,0 +1,47 @@
+---
+title: "DWLS"
+author: "Jihun Gu"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source("Deconvolution_functions.R")
+
+counts_merged <- readRDS('reference_train.rds')
+counts <- as.matrix(counts_merged)
+
+labels_data_l1 <- readRDS('labels_train.rds')
+labels_data_l1 <- gsub("CD4 T", "CD4_T", labels_data_l1)
+labels_data_l1 <- gsub("CD8 T", "CD8_T", labels_data_l1)
+labels_data_l1 <- gsub("other T", "other_T", labels_data_l1)
+
+Signature<-buildSignatureMatrixMAST(counts,labels_data_l1,"results_pbmc")
+
+saveRDS(object = Signature,
+        file = file.path("path_to_folder", "DWLS_Signature.rds"))
+```
+
+## For annotation L2
+```{r}
+labels_data_l2 <- readRDS('labels_train_l2.rds')
+
+cell_rename <- function(vector) {
+    new_names <- gsub(" ", "_", vector)
+    return(new_names)
+}
+
+labels_data_l2 <- cell_rename(labels_data_l2)
+
+
+Signature<-buildSignatureMatrixMAST(counts,labels_data_l2,"results_pbmc_l2")
+
+
+saveRDS(object = Signature,
+        file = file.path("path_to_folder", "DWLS_Signature_l2.rds"))
+```
+

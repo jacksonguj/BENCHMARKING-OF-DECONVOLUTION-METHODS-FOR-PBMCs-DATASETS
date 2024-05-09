@@ -1,0 +1,462 @@
+---
+title: "Evaluation"
+author: "Jihun Gu"
+output: html_document
+---
+
+
+# Annotation L1
+## Load in data 
+```{r cars}
+source("Deconvolution_functions.R")
+
+bulk <- readRDS('counts_sim_custom_5000.rds') #counts matrix in simulated bulk dataset for testing
+bulk_counts <- as.matrix(bulk)
+bulk_fractions <- readRDS('pseudo-bulk_5000_custom.rds') 
+true_fractions <- bulk_fractions$cell_fractions #real cell types fractions from simulated dataset
+
+#replace space with underscore
+cell_rename <- function(vector) {
+    new_names <- gsub(" ", "_", vector)
+    return(new_names)
+}
+
+cell_types_l1 <- names(true_fractions)
+cell_types_l1_updated <- cell_rename(cell_types_l1)
+
+colnames(true_fractions) <- cell_types_l1_updated
+
+Signature <- readRDS("DWLS_Signature.rds") #signature matrix based on reference training data
+Signature <- as.matrix(Signature)
+
+true_cell_types <- colnames(true_fractions) 
+signature_cell_types <- colnames(Signature)
+
+#reorder columns in signature matrix to match the order of cell types in true fractions table
+Signature <- Signature[, match(true_cell_types, signature_cell_types)]
+
+#vectors to store RMSE and Pearson correlation values for each sample 
+rmse_ols <- numeric(ncol(bulk_counts)) 
+rmse_dwls <- numeric(ncol(bulk_counts))
+rmse_svr <- numeric(ncol(bulk_counts))
+cor_ols <- numeric(ncol(bulk_counts))
+cor_dwls <- numeric(ncol(bulk_counts))
+cor_svr <- numeric(ncol(bulk_counts))
+
+#deconvolution results fro MuSiC, NNLS and xCell
+predicted_MUSIC <- as.matrix(readRDS("Predicted_MuSiC.rds"))
+predicted_NNLS <- as.matrix(readRDS("Predicted_NNLS.rds"))
+predicted_xCell <- as.matrix(readRDS("Predicted_xCell.rds"))
+```
+
+## Preprocessing
+```{r}
+predicted_MUSIC <- t(predicted_MUSIC) #samples are in columns
+predicted_NNLS <- t(predicted_NNLS)
+predicted_xCell <- t(predicted_xCell)
+
+
+rownames(predicted_MUSIC) <- cell_types_l1_updated
+rownames(predicted_NNLS) <- cell_types_l1_updated
+rownames(predicted_xCell) <- cell_types_l1_updated
+```
+
+## Deconvolution for DWLS, SVR and OLS
+```{r}
+allCounts_OLS<-NULL
+allCounts_DWLS<-NULL
+allCounts_SVR<-NULL
+
+for(j in 1:(dim(bulk_counts)[2])){
+  S<-Signature
+  Bulk<-bulk_counts[,j]
+  names(Bulk)<-rownames(bulk_counts)
+  Genes<-intersect(rownames(S), names(Bulk))
+  B<-Bulk[Genes]
+  S<-S[Genes,]
+  solOLS<-solveOLS(S,B)
+  solDWLS<-solveDampenedWLS(S,B)
+  solSVR<-solveSVR(S,B)
+  
+  allCounts_DWLS<-cbind(allCounts_DWLS,solDWLS)
+  allCounts_OLS<-cbind(allCounts_OLS,solOLS)
+  allCounts_SVR<-cbind(allCounts_SVR,solSVR)
+  
+  true_fractions_vector <- as.numeric(true_fractions[j, ])
+  
+  rmse_ols[j] <- sqrt(mean((true_fractions_vector - solOLS)^2))
+  rmse_dwls[j] <- sqrt(mean((true_fractions_vector - solDWLS)^2))
+  rmse_svr[j] <- sqrt(mean((true_fractions_vector - solSVR)^2))
+  
+  #calculate Pearson correlation
+  cor_ols[j] <- cor(true_fractions_vector, solOLS)
+  cor_dwls[j] <- cor(true_fractions_vector, solDWLS)
+  cor_svr[j] <- cor(true_fractions_vector, solSVR)
+}
+
+saveRDS(allCounts_SVR,file="allCounts_SVR.rds")
+saveRDS(allCounts_DWLS,file="allCounts_DWLS.rds")
+saveRDS(allCounts_OLS,file="allCounts_OLS.rds")
+
+mean_rmse_ols <- mean(rmse_ols)
+mean_rmse_dwls <- mean(rmse_dwls)
+mean_rmse_svr <- mean(rmse_svr)
+mean_cor_ols <- mean(cor_ols)
+mean_cor_dwls <- mean(cor_dwls)
+mean_cor_svr <- mean(cor_svr)
+```
+
+```{r}
+calculate_rmse <- function(tool_results, true_results) {
+  # Number of columns
+  num_columns <- ncol(tool_results)
+  
+  # Initialize vector to store RMSE values
+  rmse_values <- numeric(num_columns)
+  
+  # Iterate over each column
+  for (i in 1:num_columns) {
+    # Calculate RMSE for the current column pair
+    rmse_values[i] <- sqrt(mean((tool_results[, i] - true_results[, i])^2))
+  }
+  
+  return(rmse_values)
+}
+
+calculate_correlation <- function(table1, table2) {
+  # Number of columns
+  num_columns <- ncol(table1)
+  
+  # Initialize vector to store correlation coefficients
+  correlation_values <- numeric(num_columns)
+  
+  # Iterate over each column
+  for (i in 1:num_columns) {
+    # Calculate Pearson correlation coefficient for the current column pair
+    correlation_values[i] <- cor(table1[, i], table2[, i])
+  }
+  
+  return(correlation_values)
+}
+
+true_fractions <- as.matrix(true_fractions)
+
+true_fractions <- t(true_fractions)
+
+RMSE_MUSIC <- calculate_rmse(predicted_MUSIC, true_fractions)
+RMSE_NNLS <- calculate_rmse(predicted_NNLS, true_fractions)
+RMSE_xCell <- calculate_rmse(predicted_xCell, true_fractions)
+
+cor_MUSIC <- calculate_correlation(predicted_MUSIC, true_fractions)
+cor_NNLS <- calculate_correlation(predicted_NNLS, true_fractions)
+cor_xCell <- calculate_correlation(predicted_xCell, true_fractions)
+
+mean_RMSE_MUSIC <- sqrt(mean((predicted_MUSIC - true_fractions)^2))
+mean_RMSE_NNLS <- sqrt(mean((predicted_NNLS - true_fractions)^2))
+mean_RMSE_xCell <- sqrt(mean((predicted_xCell - true_fractions)^2))
+mean_cor_MUSIC <- mean(cor_MUSIC)
+mean_cor_NNLS <- mean(cor_NNLS)
+mean_cor_xCell <- mean(cor_xCell)
+```
+
+
+```{r}
+#Print RMSE and Pearson correlation
+print("RMSE:")
+print(paste("OLS:", mean_rmse_ols))
+print(paste("DWLS:", mean_rmse_dwls))
+print(paste("SVR:", mean_rmse_svr))
+print(paste("MuSiC:", mean_RMSE_MUSIC))
+print(paste("NNLS:", mean_RMSE_NNLS))
+print(paste("xCell:", mean_RMSE_xCell))
+
+print("Mean Pearson correlation:")
+print(paste("OLS:", mean_cor_ols))
+print(paste("DWLS:", mean_cor_dwls))
+print(paste("SVR:", mean_cor_svr))
+print(paste("MuSiC:", mean_cor_MUSIC))
+print(paste("NNLS:", mean_cor_NNLS))
+print(paste("xCell:", mean_cor_xCell))
+```
+
+## Dot plot of 1/RMSE and Pearson correlation
+```{r}
+library(ggplot2)
+
+Mean_RMSE_1 = c(1/mean_rmse_ols, 1/mean_rmse_dwls, 1/mean_rmse_svr, 1/mean_RMSE_MUSIC, 1/mean_RMSE_NNLS, 1/mean_RMSE_xCell)
+methods <- c("OLS", "DWLS", "SVR", "MuSiC", "NNLS", "xCell")
+Mean_Pearson = c(mean_cor_ols, mean_cor_dwls, mean_cor_svr, mean_cor_MUSIC, mean_cor_NNLS, mean_cor_xCell)
+
+#confidence interval calculation
+lower_ci <- vector("list", length(data))
+upper_ci <- vector("list", length(data))
+
+RMSE_1_data <- list(1/rmse_ols, 1/rmse_dwls, 1/rmse_svr, 1/RMSE_MUSIC, 1/RMSE_NNLS, 1/RMSE_xCell)
+
+for (i in seq_along(RMSE_1_data)) {
+  result <- t.test(RMSE_1_data[[i]])
+  lower_ci[[i]] <- result$conf.int[1]  # Extract lower CI
+  upper_ci[[i]] <- result$conf.int[2]  # Extract upper CI
+}
+
+lower_ci <- as.numeric(unlist(lower_ci))
+upper_ci <- as.numeric(unlist(upper_ci))
+
+#dataframe for the plot
+df_RMSE_CI <- data.frame(method = methods, mean_rmse = Mean_RMSE_1, pearson_corr = Mean_Pearson, lower_ci = lower_ci, upper_ci = upper_ci)
+
+pdf("1_rmse_CI.pdf", width = 12, height = 6)
+ggplot(df_RMSE_CI, aes(x = method, y = mean_rmse, fill = pearson_corr)) +
+  geom_jitter(position = position_jitter(width = 0), size = 4, alpha = 0.8, shape = 21) +
+  scale_fill_gradient(low = "red", high = "blue") +
+  labs(x = "Method", y = "1/RMSE", fill = "Pearson correlation") +  # Label axes
+  theme_minimal() +  # Minimal theme
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.3, color='black') +
+    theme(legend.position = "right") +
+    theme(axis.text = element_text(size = 10, face = "bold"),  # Adjust size and font weight of axis text
+        axis.title = element_text(size = 12))# Add error bars based on CI values
+    
+dev.off()
+```
+
+## Pearson correlation by cell type
+```{r}
+#load('allCounts_DWLS.RData')
+#load('allCounts_OLS.RData')
+#load('allCounts_SVR.RData')
+
+predicted_DWLS <- as.matrix(allCounts_DWLS)
+predicted_OLS <- as.matrix(allCounts_OLS)
+predicted_SVR <- as.matrix(allCounts_SVR)
+
+#calculating Pearson correlation for each cell type across samples
+correlation_celltype_DWLS <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_DWLS)[i,]))
+
+correlation_celltype_OLS <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_OLS)[i,]))
+
+correlation_celltype_SVR <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_SVR)[i,]))
+
+correlation_celltype_MUSIC <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_MUSIC)[i,]))
+
+correlation_celltype_NNLS <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_NNLS)[i,]))
+
+correlation_celltype_xCell <- sapply(1:nrow(as.matrix(true_fractions)), function(i) cor(as.matrix(true_fractions)[i,], as.matrix(predicted_xCell)[i,]))
+
+
+cell_types <- rownames(true_fractions)
+
+min_y_val <- min(c(correlation_celltype_DWLS, correlation_celltype_OLS, correlation_celltype_SVR, correlation_celltype_MUSIC, correlation_celltype_NNLS, correlation_celltype_xCell))
+max_y_val <- max(c(correlation_celltype_DWLS, correlation_celltype_OLS, correlation_celltype_SVR, correlation_celltype_MUSIC, correlation_celltype_NNLS, correlation_celltype_xCell))
+```
+
+```{r}
+library(reshape2)
+library(patchwork)
+library(cowplot)
+
+widths <- c(2, 1)
+heights <- c(1, 1)
+
+pastel_colors <- c("#FFB6C1", "#FFD700", "#98FB98", "#87CEFA", "#FFA07A", "#F0E68C", "#DDA0DD", "#00CED1", "#FFE4E1")
+
+correlation_celltypes <- rbind(correlation_celltype_DWLS, correlation_celltype_OLS, correlation_celltype_SVR, correlation_celltype_MUSIC, correlation_celltype_NNLS, correlation_celltype_xCell)
+
+colnames(correlation_celltypes) <- c("B", "CD4 T", "CD8 T", "DC", "Mono", "NK", "other", "other T")
+rownames(correlation_celltypes) <- c("DWLS", "OLS", "SVR", "MuSiC", "NNLS", "xCell")
+
+df_cor_celltypes <- melt(correlation_celltypes, id.vars = "Method", variable.name = "CellType", value.name = "Correlation")
+
+colnames(df_cor_celltypes) <- c("Method", "CellType", "Correlation")
+
+
+dwls_min <- 0.65 #scale limits for DWLS
+dwls_max <- 1.0
+
+plot1 <- ggplot(df_cor_celltypes, aes(x = CellType, y = Correlation)) + 
+  geom_point(aes(fill = CellType), shape = 21, size = 4) +
+  scale_fill_manual(values = pastel_colors) +
+  theme_minimal() +
+  labs(x = "Cell Type", y = "Pearson Correlation") +
+  facet_wrap(~Method) +
+  theme(axis.text.x = element_blank(), legend.position = "bottom", strip.text = element_text(size = 12, face = "bold"), panel.border = element_rect(color = "black", fill = NA, size = .5)) +
+  ylim(min_y_val, max_y_val) +
+  guides(fill = guide_legend(override.aes = list(size = 5)))
+
+plot2 <- ggplot(subset(df_cor_celltypes, Method == "DWLS"), aes(x = CellType, y = Correlation)) + 
+  geom_point(aes(fill = CellType), shape = 21, size = 4) +
+  scale_fill_manual(values = pastel_colors) +
+  theme_minimal() +
+  labs(x = "Cell Type", y = "Pearson Correlation") +
+  facet_wrap(~Method) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.text = element_text(size = 12, face = "bold"), panel.border = element_rect(color = "black", fill = NA, size = .5)) +
+  ylim(dwls_min, dwls_max) +
+  guides(color = FALSE, fill = FALSE)
+
+#plot3 <- ggplot(subset(df_melted, Method == "MuSiC"), aes(x = CellType, y = Correlation)) + 
+  #geom_point(aes(fill = CellType), shape = 21, size = 4) +
+  #scale_fill_manual(values = pastel_colors) +
+  #theme_minimal() +
+  #labs(x = "Cell Type", y = "Pearson Correlation") +
+  #facet_wrap(~Method) +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.text = element_text(size = 12, face = "bold"), panel.border = element_rect(color = "black", fill = NA, size = .5)) +
+  #ylim(0.1, max_y_val) +
+  #guides(color = FALSE, fill = FALSE)
+
+plot_grid(plot1, plot_grid(plot2, nrow = 1, ncol = 1), ncol = 2, rel_widths = widths, rel_heights = heights)
+
+```
+
+## Plot with no legend
+```{r}
+plot_all <- ggplot(df_melted, aes(x = CellType, y = Correlation)) + 
+  geom_point(aes(fill = CellType), shape = 21, size = 4) +
+  scale_fill_manual(values = pastel_colors) +
+  theme_minimal() +
+  labs(x = "Cell Type", y = "Pearson Correlation") +
+  facet_wrap(~Method) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.text = element_text(size = 12, face = "bold")) +
+  ylim(min_y_val, max_y_val) +
+  guides(color = FALSE, fill = FALSE) #removing legend
+
+plot_dwls <- ggplot(subset(df_melted, Method == "DWLS"), aes(x = CellType, y = Correlation)) + 
+  geom_point(aes(fill = CellType), shape = 21, size = 4) +
+  scale_fill_manual(values = pastel_colors) +
+  theme_minimal() +
+  labs(x = "Cell Type", y = "Pearson Correlation") +
+  facet_wrap(~Method) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.text = element_text(size = 12, face = "bold"), panel.border = element_rect(color = "black", fill = NA, size = .5)) +
+  ylim(dwls_min, dwls_max) +
+  guides(color = FALSE, fill = FALSE)
+
+plot_all + plot_dwls
+```
+
+
+#Annotation L2
+```{r}
+bulk_l2 <- readRDS('counts_sim_custom_l2.rds')
+bulk_counts_l2 <- as.matrix(bulk_l2)
+bulk_fractions_l2 <- readRDS('pseudo-bulk_custom_l2.rds')
+true_fractions_l2 <- bulk_fractions_l2$cell_fractions
+
+true_cell_types_l2 <- names(true_fractions_l2)
+true_cell_types_l2_updated <- cell_rename(true_cell_types_l2)
+
+allCounts_OLS_l2<-NULL
+allCounts_DWLS_l2<-NULL
+allCounts_SVR_l2<-NULL
+
+load("Sig.RData")
+Signature_l2 <- Sig
+Signature_l2 <- as.matrix(Signature_l2)
+
+signature_cell_types_l2 <- colnames(Signature_l2)
+
+# Reorder columns in signature matrix to match the order of cell types in true fractions table
+Signature_l2 <- Signature_l2[, match(true_cell_types_l2_updated, signature_cell_types_l2)]
+
+rmse_ols_l2 <- numeric(ncol(bulk_counts_l2))
+rmse_dwls_l2 <- numeric(ncol(bulk_counts_l2))
+rmse_svr_l2 <- numeric(ncol(bulk_counts_l2))
+cor_ols_l2 <- numeric(ncol(bulk_counts_l2))
+cor_dwls_l2 <- numeric(ncol(bulk_counts_l2))
+cor_svr_l2 <- numeric(ncol(bulk_counts_l2))
+```
+
+```{r}
+for(j in 1:(dim(bulk_counts_l2)[2])){
+  S<-Signature_l2
+  Bulk<-bulk_counts_l2[,j]
+  names(Bulk)<-rownames(bulk_counts_l2)
+  Genes<-intersect(rownames(S), names(Bulk))
+  B<-Bulk[Genes]
+  S<-S[Genes,]
+  solOLS<-solveOLS(S,B)
+  solDWLS<-solveDampenedWLS(S,B)
+  solSVR<-solveSVR(S,B)
+  
+  allCounts_DWLS_l2<-cbind(allCounts_DWLS_l2,solDWLS)
+  allCounts_OLS_l2<-cbind(allCounts_OLS_l2,solOLS)
+  allCounts_SVR_l2<-cbind(allCounts_SVR_l2,solSVR)
+  
+  true_fractions_vector <- as.numeric(true_fractions_l2[j, ])
+  
+  rmse_ols_l2[j] <- sqrt(mean((true_fractions_vector - solOLS)^2))
+  rmse_dwls_l2[j] <- sqrt(mean((true_fractions_vector - solDWLS)^2))
+  rmse_svr_l2[j] <- sqrt(mean((true_fractions_vector - solSVR)^2))
+  
+  # Calculate Pearson correlation
+  cor_ols_l2[j] <- cor(true_fractions_vector, solOLS)
+  cor_dwls_l2[j] <- cor(true_fractions_vector, solDWLS)
+  cor_svr_l2[j] <- cor(true_fractions_vector, solSVR)
+}
+
+#saveRDS(allCounts_SVR,file="allCounts_SVR.rds")
+#saveRDS(allCounts_DWLS,file="allCounts_DWLS.rds")
+#saveRDS(allCounts_OLS,file="allCounts_OLS.rds")
+
+predicted_MUSIC_l2 <- as.matrix(readRDS("Predicted_MuSiC_2.rds"))
+predicted_NNLS_l2 <- as.matrix(readRDS("Predicted_NNLS_2.rds"))
+predicted_xCell_l2 <- as.matrix(readRDS("Predicted_xCell_2.rds"))
+
+predicted_MUSIC_l2 <- t(predicted_MUSIC_l2)
+predicted_NNLS_l2 <- t(predicted_NNLS_l2)
+predicted_xCell_l2 <- t(predicted_xCell_l2)
+
+predicted_MUSIC_l2 <- predicted_MUSIC_l2[order(row.names(predicted_MUSIC_l2)), ]
+predicted_NNLS_l2 <- predicted_NNLS_l2[order(row.names(predicted_NNLS_l2)), ]
+predicted_xCell_l2 <- predicted_xCell_l2[order(row.names(predicted_xCell_l2)), ]
+
+rownames(predicted_MUSIC_l2) <- true_cell_types_l2_updated
+rownames(predicted_NNLS_l2) <- true_cell_types_l2_updated
+rownames(predicted_xCell_l2) <- true_cell_types_l2_updated
+
+mean_rmse_ols_l2 <- mean(rmse_ols_l2)
+mean_rmse_dwls_l2 <- mean(rmse_dwls_l2)
+mean_rmse_svr_l2 <- mean(rmse_svr_l2)
+mean_cor_ols_l2 <- mean(cor_ols_l2)
+mean_cor_dwls_l2 <- mean(cor_dwls_l2)
+mean_cor_svr_l2 <- mean(cor_svr_l2)
+
+true_fractions_l2 <- t(true_fractions_l2)
+
+RMSE_MUSIC_l2 <- calculate_rmse(predicted_MUSIC_l2, true_fractions_l2)
+RMSE_NNLS_l2 <- calculate_rmse(predicted_NNLS_l2, true_fractions_l2)
+RMSE_xCell_l2 <- calculate_rmse(predicted_xCell_l2, true_fractions_l2)
+
+cor_MUSIC_l2 <- calculate_correlation(predicted_MUSIC_l2, true_fractions_l2)
+cor_NNLS_l2 <- calculate_correlation(predicted_NNLS_l2, true_fractions_l2)
+cor_xCell_l2 <- calculate_correlation(predicted_xCell_l2, true_fractions_l2)
+
+mean_RMSE_MUSIC_l2 <- mean(RMSE_MUSIC_l2)
+mean_RMSE_NNLS_l2 <- mean(RMSE_NNLS_l2)
+mean_RMSE_xCell_l2 <- mean(RMSE_xCell_l2)
+mean_cor_MUSIC_l2 <- mean(cor_MUSIC_l2)
+mean_cor_NNLS_l2 <- mean(cor_NNLS_l2)
+mean_cor_xCell_l2 <- mean(cor_xCell_l2)
+```
+
+## Dot plot of 1/RMSE and Pearson correlation for annotation L2
+```{r}
+method_names <- c("OLS", "DWLS", "SVR", "MuSiC", "NNLS", "xCell") 
+mean_rmse_l1 <- c(1/mean_rmse_ols, 1/mean_rmse_dwls, 1/mean_rmse_svr, 1/mean_RMSE_MUSIC, 1/mean_RMSE_NNLS, 1/mean_RMSE_xCell)  #mean RMSE values for L1
+mean_rmse_l2 <- c(1/mean_rmse_ols_l2, 1/mean_rmse_dwls_l2, 1/mean_rmse_svr_l2, 1/mean_RMSE_MUSIC_l2, 1/mean_RMSE_NNLS_l2, 1/mean_RMSE_xCell_l2)  #mean RMSE values for L2
+pearson_corr_l1 <- c(mean_cor_ols, mean_cor_dwls, mean_cor_svr, mean_cor_MUSIC, mean_cor_NNLS, mean_cor_xCell)  #Pearson correlation values for L1
+pearson_corr_l2 <- c(mean_cor_ols_l2, mean_cor_dwls_l2, mean_cor_svr_l2, mean_cor_MUSIC_l2, mean_cor_NNLS_l2, mean_cor_xCell_l2)  #Pearson correlation values for L2
+
+#dataframe for plotting
+df <- data.frame(method = rep(method_names, 2), 
+                 rmse = c(mean_rmse_l1, mean_rmse_l2), 
+                 pearson_corr = c(pearson_corr_l1, pearson_corr_l2), 
+                 annotation = rep(c("L1", "L2"), each = length(method_names)))
+
+ggplot(df, aes(x = method, y = annotation, size = rmse, fill = pearson_corr)) +
+  geom_jitter(position = position_nudge(x = -0.15), alpha = 0.6, shape = 21) +
+  scale_fill_gradient(low = "red", high = "blue") + 
+    scale_size_continuous(range = c(3, 10)) +
+  labs(x = "Method", y = "Annotation level", size = "1/RMSE", color = "Pearson Correlation") +
+  theme_minimal() + 
+  theme(legend.position = "right", panel.grid = element_blank()) +
+    theme(axis.text = element_text(size = 10, face = "bold"),
+        axis.title = element_text(size = 12))
+```
