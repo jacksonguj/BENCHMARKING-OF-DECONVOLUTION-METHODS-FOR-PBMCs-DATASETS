@@ -1,0 +1,115 @@
+---
+title: "xCell_New"
+author: "Jihun Gu"
+output: html_document
+date: "2024-03-01"
+---
+
+## xCell
+```{r}
+devtools::install_github('dviraran/xCell')
+```
+
+```{r}
+library(xCell)
+```
+
+## Anotation L1
+```{r}
+counts_sim = readRDS('counts_sim_custom_5000.rds')
+```
+
+```{r}
+pseudo.mtx <- as.matrix(counts_sim)
+```
+
+
+```{r}
+result <- xCellAnalysis(pseudo.mtx)
+result
+```
+
+```{r}
+result <- as.matrix(result)
+```
+
+```{r}
+result <- t(result)
+```
+
+```{r}
+B <- rowSums(result[, c(4, 17, 38, 46, 54, 57)])
+Mono <- result[, 41]
+CD8_T <- rowSums(result[, c(11, 12, 13, 14)])
+NK <- result[, 49]
+CD4_T <- rowSums(result[, c(6, 7, 8, 9, 10)])
+other_T <- rowSums(result[, c(61, 62, 63, 64)])
+other <- rowSums(result[, c(1, 2, 16, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 40, 42, 43, 44, 45, 47, 48, 50, 51, 52, 53, 55, 56, 58, 59, 60, 65, 66, 67)])
+DC <- rowSums(result[, c(20, 15)])
+```
+
+```{r}
+Predicted_xCell <- cbind(B, Mono, CD8_T, NK, CD4_T, other_T, other, DC)
+saveRDS(Predicted_xCell, file = "Predicted_xCell_l1.rds")
+```
+
+## Annotation L2
+```{r}
+counts_sim = readRDS('counts_bulk_custom_l2.rds')
+```
+
+```{r}
+pseudo.mtx <- as.matrix(counts_sim)
+```
+
+
+```{r}
+result <- xCellAnalysis(pseudo.mtx)
+result
+```
+
+```{r}
+result <- as.matrix(result)
+```
+
+```{r}
+result <- t(result)
+```
+
+```{r}
+B_intermediate <- result[, 4]
+CD14_Mono <- result[, 40]
+CD8_Naive <- result[, 11]
+NK <- result[, 45]
+CD16_Mono <- result[, 40]
+CD4_TCM <- result[, 39]
+CD8_TEM <- result[, 42]
+B_naive <- result[, 6]
+CD4_Naive <- result[, 7]
+CD4_TEM <- result[, 40]
+MAIT <- result[, 64]
+Platelet <- result[, 55]
+Treg <- result[, 60]
+CD8_TCM <- result[, 41]
+cDC2 <- result[, 19]
+NK_CD56bright <- result[, 45]
+CD4_Proliferating <- result[, 36]
+pDC <- result[, 46]
+NK_Proliferating <- result[, 45]
+B_memory <- result[, 5]
+gdT <- result[, 62]
+cDC1 <- result[, 19]
+CD4_CTL <- result[, 38]
+Plasmablast <- result[, 49]
+ASDC <- result[, 66]
+HSPC <- result[, 50]
+CD8_Proliferating <- result[, 42]
+dnT <- result[, 63]
+Eryth <- result[, 47]
+ILC <- result[, 59]
+```
+
+```{r}
+Predicted_xCell <- cbind(B_intermediate, CD14_Mono, CD8_Naive, NK, CD16_Mono, CD4_TCM, CD8_TEM, B_naive, CD4_Naive, CD4_TEM, MAIT, Platelet, Treg, CD8_TCM, cDC2, NK_CD56bright, CD4_Proliferating, pDC, NK_Proliferating, B_memory, gdT, cDC1, CD4_CTL, Plasmablast, ASDC, HSPC, CD8_Proliferating, dnT, Eryth, ILC)
+saveRDS(Predicted_xCell, file = "Predicted_xCell_l2.rds")
+```
